@@ -3,9 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+
+	"github.com/formancehq/orchestration/internal/storage"
+	"github.com/formancehq/stack/libs/go-libs/bun/bunmigrate"
+	"github.com/uptrace/bun"
 
 	"github.com/formancehq/stack/libs/go-libs/aws/iam"
 	"github.com/formancehq/stack/libs/go-libs/bun/bunconnect"
@@ -69,7 +72,14 @@ func NewRootCommand() *cobra.Command {
 	cmd.PersistentFlags().String(temporalTaskQueueFlag, "default", "Temporal task queue name")
 	cmd.PersistentFlags().StringSlice(topicsFlag, []string{}, "Topics to listen")
 	cmd.PersistentFlags().String(stackFlag, "", "Stack")
-	cmd.AddCommand(newServeCommand(), newVersionCommand(), newWorkerCommand())
+	cmd.AddCommand(
+		newServeCommand(),
+		newVersionCommand(),
+		newWorkerCommand(),
+		bunmigrate.NewDefaultCommand(func(cmd *cobra.Command, args []string, db *bun.DB) error {
+			return storage.Migrate(cmd.Context(), db)
+		}),
+	)
 
 	publish.InitCLIFlags(cmd)
 	auth.InitAuthFlags(cmd.PersistentFlags())
@@ -90,13 +100,13 @@ func Execute() {
 	}
 }
 
-func commonOptions(output io.Writer) (fx.Option, error) {
-	connectionOptions, err := bunconnect.ConnectionOptionsFromFlags(viper.GetViper(), output, viper.GetBool(service.DebugFlag))
+func commonOptions(cmd *cobra.Command) (fx.Option, error) {
+	connectionOptions, err := bunconnect.ConnectionOptionsFromFlags(cmd.Context())
 	if err != nil {
 		return nil, err
 	}
 	return fx.Options(
-		otlptraces.CLITracesModule(viper.GetViper()),
+		otlptraces.CLITracesModule(),
 		temporalclient.NewModule(
 			viper.GetString(temporalAddressFlag),
 			viper.GetString(temporalNamespaceFlag),
@@ -104,8 +114,8 @@ func commonOptions(output io.Writer) (fx.Option, error) {
 			viper.GetString(temporalSSLClientKeyFlag),
 		),
 		bunconnect.Module(*connectionOptions),
-		publish.CLIPublisherModule(viper.GetViper(), "orchestration"),
-		auth.CLIAuthModule(viper.GetViper()),
+		publish.CLIPublisherModule("orchestration"),
+		auth.CLIAuthModule(),
 		workflow.NewModule(viper.GetString(temporalTaskQueueFlag)),
 		triggers.NewModule(viper.GetString(temporalTaskQueueFlag)),
 		fx.Provide(func() *http.Client {

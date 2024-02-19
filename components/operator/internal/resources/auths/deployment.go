@@ -10,17 +10,16 @@ import (
 	"github.com/formancehq/operator/internal/resources/databases"
 	"github.com/formancehq/operator/internal/resources/deployments"
 	"github.com/formancehq/operator/internal/resources/gateways"
-	"github.com/formancehq/operator/internal/resources/registries"
 	. "github.com/formancehq/stack/libs/go-libs/collectionutils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
 func createDeployment(ctx Context, stack *v1beta1.Stack, auth *v1beta1.Auth, database *v1beta1.Database,
-	configMap *corev1.ConfigMap, version string) (*appsv1.Deployment, error) {
+	configMap *corev1.ConfigMap, image string) (*appsv1.Deployment, error) {
 
 	env := make([]corev1.EnvVar, 0)
-	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, LowerCamelCaseName(ctx, auth))
+	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, LowerCamelCaseKind(ctx, auth))
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +66,9 @@ func createDeployment(ctx Context, stack *v1beta1.Stack, auth *v1beta1.Auth, dat
 		env = append(env, Env("CAOS_OIDC_DEV", "1"))
 	}
 
-	image, err := registries.GetImage(ctx, stack, "auth", version)
-	if err != nil {
-		return nil, err
-	}
-
 	return deployments.CreateOrUpdate(ctx, stack, auth, "auth",
 		deployments.WithMatchingLabels("auth"),
+		deployments.WithServiceAccountName(database.Status.URI.Query().Get("awsRole")),
 		func(t *appsv1.Deployment) error {
 			t.Spec.Template.Annotations = MergeMaps(t.Spec.Template.Annotations, map[string]string{
 				"config-hash": HashFromConfigMaps(configMap),

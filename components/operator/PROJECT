@@ -169,7 +169,7 @@ resources:
 - api:
     crdVersion: v1
   group: formance.com
-  kind: SecretReference
+  kind: ResourceReference
   path: github.com/formancehq/operator/api/formance.com/v1beta1
   version: v1beta1
 version: "3"

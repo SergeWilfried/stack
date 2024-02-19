@@ -21,7 +21,7 @@ type BankAccount struct {
 	Country       string `bun:"country"`
 	Metadata      map[string]string
 
-	Adjustments []*BankAccountAdjustment `bun:"rel:has-many,join:id=bank_account_id"`
+	RelatedAccounts []*BankAccountRelatedAccount `bun:"rel:has-many,join:id=bank_account_id"`
 }
 
 func (a *BankAccount) Offuscate() error {
@@ -46,8 +46,8 @@ func (a *BankAccount) Offuscate() error {
 	return nil
 }
 
-type BankAccountAdjustment struct {
-	bun.BaseModel `bun:"accounts.bank_account_adjustments"`
+type BankAccountRelatedAccount struct {
+	bun.BaseModel `bun:"accounts.bank_account_related_accounts"`
 
 	ID            uuid.UUID   `bun:",pk,nullzero"`
 	CreatedAt     time.Time   `bun:",nullzero"`
@@ -55,3 +55,13 @@ type BankAccountAdjustment struct {
 	ConnectorID   ConnectorID `bun:",nullzero"`
 	AccountID     AccountID   `bun:",nullzero"`
 }
+
+const (
+	bankAccountOwnerNamespace = formanceMetadataSpecNamespace + "owner/"
+
+	BankAccountOwnerAddressLine1MetadataKey = bankAccountOwnerNamespace + "addressLine1"
+	BankAccountOwnerAddressLine2MetadataKey = bankAccountOwnerNamespace + "addressLine2"
+	BankAccountOwnerCityMetadataKey         = bankAccountOwnerNamespace + "city"
+	BankAccountOwnerRegionMetadataKey       = bankAccountOwnerNamespace + "region"
+	BankAccountOwnerPostalCodeMetadataKey   = bankAccountOwnerNamespace + "postalCode"
+)

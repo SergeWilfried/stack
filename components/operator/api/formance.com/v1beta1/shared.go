@@ -133,8 +133,6 @@ func (c *StatusWithConditions) SetCondition(condition Condition) {
 
 type ModuleStatus struct {
 	StatusWithConditions `json:",inline"`
-	//+optional
-	Version string `json:"version,omitempty"`
 }
 
 type AuthConfig struct {
@@ -248,7 +246,8 @@ func (u *URI) UnmarshalJSON(data []byte) error {
 
 func (in *URI) WithoutQuery() *URI {
 	cp := *in.URL
-	in.URL.RawQuery = ""
+	cp.ForceQuery = false
+	cp.RawQuery = ""
 	return &URI{
 		URL: &cp,
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/formancehq/payments/cmd/connectors/internal/metrics"
 	"github.com/formancehq/payments/cmd/connectors/internal/storage"
 	"github.com/formancehq/payments/internal/models"
+	"github.com/formancehq/stack/libs/go-libs/api"
 	"github.com/formancehq/stack/libs/go-libs/logging"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -49,8 +50,8 @@ type DefaultTaskScheduler struct {
 	workerPool       *pond.WorkerPool
 }
 
-func (s *DefaultTaskScheduler) ListTasks(ctx context.Context, pagination storage.PaginatorQuery) ([]*models.Task, storage.PaginationDetails, error) {
-	return s.store.ListTasks(ctx, s.connectorID, pagination)
+func (s *DefaultTaskScheduler) ListTasks(ctx context.Context, q storage.ListTasksQuery) (*api.Cursor[models.Task], error) {
+	return s.store.ListTasks(ctx, s.connectorID, q)
 }
 
 func (s *DefaultTaskScheduler) ReadTask(ctx context.Context, taskID uuid.UUID) (*models.Task, error) {
@@ -138,8 +139,9 @@ func (s *DefaultTaskScheduler) schedule(ctx context.Context, descriptor models.T
 
 func (s *DefaultTaskScheduler) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.stopped = true
-	s.mu.Unlock()
 
 	s.logger(ctx).Infof("Stopping scheduler...")
 	s.workerPool.Stop()

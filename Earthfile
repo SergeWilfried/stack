@@ -20,30 +20,30 @@ speakeasy:
     SAVE ARTIFACT speakeasy
 
 build-final-spec:
-    ARG version=INTERNAL
     FROM core+base-image
     RUN apk update && apk add yarn nodejs npm jq
     WORKDIR /src/releases
     COPY releases/package.* .
     RUN npm install
-    WORKDIR /src/components
-    FOR c IN payments ledger
-        COPY (./components/$c+openapi/openapi.yaml) /src/components/$c/
-    END
-    WORKDIR /src/ee
-    FOR c IN auth webhooks search wallets reconciliation orchestration
-        COPY (./ee/$c+openapi/openapi.yaml) /src/ee/$c/
-    END
 
     WORKDIR /src/releases
     COPY releases/base.yaml .
     COPY releases/openapi-overlay.json .
     COPY releases/openapi-merge.json .
     RUN mkdir ./build
+
+    FOR c IN payments ledger
+        COPY (./components/$c+openapi/openapi.yaml) /src/components/$c/
+    END
+    FOR c IN auth webhooks search wallets reconciliation orchestration
+        COPY (./ee/$c+openapi/openapi.yaml) /src/ee/$c/
+    END
+
     RUN npm run build
     RUN jq -s '.[0] * .[1]' build/generate.json openapi-overlay.json > build/latest.json
-    IF [ "$version" = "INTERNAL" ]
-        RUN sed -i 's/SDK_VERSION/INTERNAL/g' build/latest.json
+    ARG version=v0.0.0
+    IF [ "$version" = "v0.0.0" ]
+        RUN sed -i 's/SDK_VERSION/v0.0.0/g' build/latest.json
         SAVE ARTIFACT build/latest.json AS LOCAL releases/build/latest.json
     ELSE
         RUN sed -i 's/SDK_VERSION/'$version'/g' build/latest.json
@@ -94,6 +94,9 @@ goreleaser:
 
 all-ci-goreleaser:
     LOCALLY
+    FOR component IN $(cd ./tools && ls -d */)
+        BUILD --pass-args +goreleaser --type=components --components=$component --mode=ci
+    END
     FOR component IN $(cd ./components && ls -d */)
         BUILD --pass-args +goreleaser --type=components --components=$component --mode=ci
     END
@@ -103,6 +106,9 @@ all-ci-goreleaser:
 
 build-all:
     LOCALLY
+    FOR component IN $(cd ./tools && ls -d */)
+        BUILD --pass-args ./tools/${component}+build-image
+    END
     FOR component IN $(cd ./components && ls -d */)
         BUILD --pass-args ./components/${component}+build-image
     END
@@ -114,6 +120,9 @@ deploy-all:
     LOCALLY
     WAIT
         BUILD --pass-args ./components/+deploy --components=operator
+    END
+    FOR component IN $(cd ./tools && ls -d */)
+        BUILD --pass-args ./tools/$component+deploy
     END
     FOR component IN $(cd ./components && ls -d */)
         IF [ "$component" != "operator" ]
@@ -140,6 +149,9 @@ tests-integration:
 pre-commit: # Generate the final spec and run all the pre-commit hooks
     LOCALLY
     BUILD --pass-args ./releases+sdk-generate
+    FOR component IN $(cd ./tools && ls -d */)
+        BUILD --pass-args ./tools/${component}+pre-commit
+    END
     FOR component IN $(cd ./components && ls -d */)
         BUILD --pass-args ./components/${component}+pre-commit
     END
@@ -150,6 +162,9 @@ pre-commit: # Generate the final spec and run all the pre-commit hooks
 
 tidy: # Run tidy on all the components
     LOCALLY
+    FOR component IN $(cd ./tools && ls -d */)
+            BUILD --pass-args ./tools/${component}+tidy
+        END
     FOR component IN $(cd ./components && ls -d */)
         BUILD --pass-args ./components/${component}+tidy
     END

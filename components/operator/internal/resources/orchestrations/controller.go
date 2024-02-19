@@ -22,7 +22,11 @@ import (
 	"github.com/formancehq/operator/internal/resources/brokertopicconsumers"
 	"github.com/formancehq/operator/internal/resources/databases"
 	"github.com/formancehq/operator/internal/resources/gatewayhttpapis"
+	"github.com/formancehq/operator/internal/resources/jobs"
+	"github.com/formancehq/operator/internal/resources/registries"
+	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 )
 
 //+kubebuilder:rbac:groups=formance.com,resources=orchestrations,verbs=get;list;watch;create;update;patch;delete
@@ -31,7 +35,7 @@ import (
 
 func Reconcile(ctx Context, stack *v1beta1.Stack, o *v1beta1.Orchestration, version string) error {
 
-	database, err := databases.Create(ctx, o)
+	database, err := databases.Create(ctx, stack, o)
 	if err != nil {
 		return err
 	}
@@ -50,9 +54,29 @@ func Reconcile(ctx Context, stack *v1beta1.Stack, o *v1beta1.Orchestration, vers
 		return err
 	}
 
-	if database.Status.Ready && consumers.Ready() {
-		if err := createDeployment(ctx, stack, o, database, authClient, consumers, version); err != nil {
-			return err
+	if database.Status.Ready {
+		image, err := registries.GetImage(ctx, stack, "orchestration", version)
+		if err != nil {
+			return errors.Wrap(err, "resolving image")
+		}
+
+		if IsGreaterOrEqual(version, "v2.0.0-rc.5") && databases.GetSavedModuleVersion(database) != version {
+			if err := jobs.Handle(ctx, o, "migrate",
+				databases.MigrateDatabaseContainer(image, database),
+				jobs.WithServiceAccount(database.Status.URI.Query().Get("awsRole")),
+			); err != nil {
+				return err
+			}
+
+			if err := databases.SaveModuleVersion(ctx, database, version); err != nil {
+				return errors.Wrap(err, "saving module version in database object")
+			}
+		}
+
+		if consumers.Ready() {
+			if err := createDeployment(ctx, stack, o, database, authClient, consumers, image); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -66,7 +90,8 @@ func init() {
 			WithOwn[*v1beta1.Orchestration](&v1beta1.AuthClient{}),
 			WithOwn[*v1beta1.Orchestration](&appsv1.Deployment{}),
 			WithOwn[*v1beta1.Orchestration](&v1beta1.GatewayHTTPAPI{}),
-			WithOwn[*v1beta1.Orchestration](&v1beta1.SecretReference{}),
+			WithOwn[*v1beta1.Orchestration](&v1beta1.ResourceReference{}),
+			WithOwn[*v1beta1.Orchestration](&batchv1.Job{}),
 			WithWatchSettings[*v1beta1.Orchestration](),
 			WithWatchDependency[*v1beta1.Orchestration](&v1beta1.Ledger{}),
 			WithWatchDependency[*v1beta1.Orchestration](&v1beta1.Auth{}),

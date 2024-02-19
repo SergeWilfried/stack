@@ -2,9 +2,9 @@ package orchestrations
 
 import (
 	"fmt"
+	"github.com/formancehq/operator/internal/resources/resourcereferences"
 	"strings"
 
-	"github.com/formancehq/operator/internal/resources/secretreferences"
 	appsv1 "k8s.io/api/apps/v1"
 
 	"github.com/formancehq/operator/internal/resources/settings"
@@ -16,7 +16,6 @@ import (
 	"github.com/formancehq/operator/internal/resources/databases"
 	"github.com/formancehq/operator/internal/resources/deployments"
 	"github.com/formancehq/operator/internal/resources/gateways"
-	"github.com/formancehq/operator/internal/resources/registries"
 	"github.com/formancehq/stack/libs/go-libs/collectionutils"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -47,10 +46,10 @@ func createAuthClient(ctx Context, stack *v1beta1.Stack, orchestration *v1beta1.
 
 func createDeployment(ctx Context, stack *v1beta1.Stack, orchestration *v1beta1.Orchestration,
 	database *v1beta1.Database, client *v1beta1.AuthClient,
-	consumers []*v1beta1.BrokerTopicConsumer, version string) error {
+	consumers []*v1beta1.BrokerTopicConsumer, image string) error {
 
 	env := make([]v1.EnvVar, 0)
-	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, LowerCamelCaseName(ctx, orchestration))
+	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, LowerCamelCaseKind(ctx, orchestration))
 	if err != nil {
 		return err
 	}
@@ -73,7 +72,12 @@ func createDeployment(ctx Context, stack *v1beta1.Stack, orchestration *v1beta1.
 		return err
 	}
 
-	secretReference, err := secretreferences.Sync(ctx, orchestration, "temporal", temporalURI)
+	var resourceReference *v1beta1.ResourceReference
+	if secret := temporalURI.Query().Get("secret"); secret != "" {
+		resourceReference, err = resourcereferences.Create(ctx, database, "temporal", secret, &v1.Secret{})
+	} else {
+		err = resourcereferences.Delete(ctx, database, "temporal")
+	}
 	if err != nil {
 		return err
 	}
@@ -127,13 +131,9 @@ func createDeployment(ctx Context, stack *v1beta1.Stack, orchestration *v1beta1.
 	}
 	env = append(env, brokerEnvVars...)
 
-	image, err := registries.GetImage(ctx, stack, "orchestration", version)
-	if err != nil {
-		return err
-	}
-
 	_, err = deployments.CreateOrUpdate(ctx, stack, orchestration, "orchestration",
-		secretreferences.Annotate[*appsv1.Deployment]("temporal-secret-hash", secretReference),
+		resourcereferences.Annotate[*appsv1.Deployment]("temporal-secret-hash", resourceReference),
+		deployments.WithServiceAccountName(database.Status.URI.Query().Get("awsRole")),
 		deployments.WithMatchingLabels("orchestration"),
 		deployments.WithContainers(v1.Container{
 			Name:          "api",

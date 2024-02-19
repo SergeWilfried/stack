@@ -5,10 +5,11 @@ import (
 	"database/sql/driver"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/formancehq/stack/libs/go-libs/aws/iam"
+	"github.com/formancehq/stack/libs/go-libs/logging"
+	"github.com/formancehq/stack/libs/go-libs/service"
 	"github.com/lib/pq"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"io"
 	"time"
 )
 
@@ -26,12 +27,17 @@ func InitFlags(flags *pflag.FlagSet) {
 	flags.Int(PostgresMaxIdleConnsFlag, 0, "Max Idle connections")
 	flags.Duration(PostgresConnMaxIdleTimeFlag, time.Minute, "Max Idle time for connections")
 	flags.Int(PostgresMaxOpenConnsFlag, 20, "Max opened connections")
+
+	if err := viper.BindPFlags(flags); err != nil {
+		panic(err)
+	}
 }
 
-func ConnectionOptionsFromFlags(v *viper.Viper, output io.Writer, debug bool) (*ConnectionOptions, error) {
+func ConnectionOptionsFromFlags(ctx context.Context) (*ConnectionOptions, error) {
 	var connector func(string) (driver.Connector, error)
-	if v.GetBool(PostgresAWSEnableIAMFlag) {
-		cfg, err := config.LoadDefaultConfig(context.Background(), iam.LoadOptionFromViper(v))
+
+	if viper.GetBool(PostgresAWSEnableIAMFlag) {
+		cfg, err := config.LoadDefaultConfig(context.Background(), iam.LoadOptionFromViper())
 		if err != nil {
 			return nil, err
 		}
@@ -42,6 +48,7 @@ func ConnectionOptionsFromFlags(v *viper.Viper, output io.Writer, debug bool) (*
 				driver: &iamDriver{
 					awsConfig: cfg,
 				},
+				logger: logging.FromContext(ctx),
 			}, nil
 		}
 	} else {
@@ -50,12 +57,11 @@ func ConnectionOptionsFromFlags(v *viper.Viper, output io.Writer, debug bool) (*
 		}
 	}
 	return &ConnectionOptions{
-		DatabaseSourceName: v.GetString(PostgresURIFlag),
-		Debug:              debug,
-		Writer:             output,
-		MaxIdleConns:       v.GetInt(PostgresMaxIdleConnsFlag),
-		ConnMaxIdleTime:    v.GetDuration(PostgresConnMaxIdleTimeFlag),
-		MaxOpenConns:       v.GetInt(PostgresMaxOpenConnsFlag),
+		DatabaseSourceName: viper.GetString(PostgresURIFlag),
+		Debug:              service.IsDebug(),
+		MaxIdleConns:       viper.GetInt(PostgresMaxIdleConnsFlag),
+		ConnMaxIdleTime:    viper.GetDuration(PostgresConnMaxIdleTimeFlag),
+		MaxOpenConns:       viper.GetInt(PostgresMaxOpenConnsFlag),
 		Connector:          connector,
 	}, nil
 }

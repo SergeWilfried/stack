@@ -7,6 +7,7 @@ import (
 	"github.com/formancehq/payments/cmd/connectors/internal/api/service"
 	"github.com/formancehq/payments/cmd/connectors/internal/storage"
 	"github.com/formancehq/payments/internal/models"
+	"github.com/formancehq/stack/libs/go-libs/api"
 	"github.com/google/uuid"
 )
 
@@ -15,6 +16,7 @@ type Service interface {
 	Ping() error
 	CreateBankAccount(ctx context.Context, req *service.CreateBankAccountRequest) (*models.BankAccount, error)
 	ForwardBankAccountToConnector(ctx context.Context, id string, req *service.ForwardBankAccountToConnectorRequest) (*models.BankAccount, error)
+	UpdateBankAccountMetadata(ctx context.Context, id string, req *service.UpdateBankAccountMetadataRequest) error
 	ListConnectors(ctx context.Context) ([]*models.Connector, error)
 	CreateTransferInitiation(ctx context.Context, req *service.CreateTransferInitiationRequest) (*models.TransferInitiation, error)
 	UpdateTransferInitiationStatus(ctx context.Context, transferID string, req *service.UpdateTransferInitiationStatusRequest) error
@@ -29,7 +31,7 @@ type Manager[ConnectorConfig models.ConnectorConfigObject] interface {
 	Connectors() map[string]*manager.ConnectorManager
 	ReadConfig(ctx context.Context, connectorID models.ConnectorID) (ConnectorConfig, error)
 	UpdateConfig(ctx context.Context, connectorID models.ConnectorID, config ConnectorConfig) error
-	ListTasksStates(ctx context.Context, connectorID models.ConnectorID, pagination storage.PaginatorQuery) ([]*models.Task, storage.PaginationDetails, error)
+	ListTasksStates(ctx context.Context, connectorID models.ConnectorID, q storage.ListTasksQuery) (*api.Cursor[models.Task], error)
 	CreateWebhookAndContext(ctx context.Context, webhook *models.Webhook) (context.Context, error)
 	ReadTaskState(ctx context.Context, connectorID models.ConnectorID, taskID uuid.UUID) (*models.Task, error)
 	Install(ctx context.Context, name string, config ConnectorConfig) (models.ConnectorID, error)

@@ -22,8 +22,8 @@ Package v1beta1 contains API Schema definitions for the formance v1beta1 API gro
 - [Orchestration](#orchestration)
 - [Payments](#payments)
 - [Reconciliation](#reconciliation)
+- [ResourceReference](#resourcereference)
 - [Search](#search)
-- [SecretReference](#secretreference)
 - [Settings](#settings)
 - [Stack](#stack)
 - [Stargate](#stargate)
@@ -307,8 +307,8 @@ _Appears in:_
 - [OrchestrationStatus](#orchestrationstatus)
 - [PaymentsStatus](#paymentsstatus)
 - [ReconciliationStatus](#reconciliationstatus)
+- [ResourceReferenceStatus](#resourcereferencestatus)
 - [SearchStatus](#searchstatus)
-- [SecretReferenceStatus](#secretreferencestatus)
 - [StackStatus](#stackstatus)
 - [StargateStatus](#stargatestatus)
 - [StatusWithConditions](#statuswithconditions)
@@ -382,6 +382,7 @@ _Appears in:_
 | --- | --- |
 | `stack` _string_ |  |
 | `service` _string_ |  |
+| `debug` _boolean_ |  |
 
 
 
@@ -506,6 +507,7 @@ _Appears in:_
 | `stack` _string_ |  |
 | `name` _string_ | Name indicates prefix api |
 | `rules` _[GatewayHTTPAPIRule](#gatewayhttpapirule) array_ | Rules |
+| `healthCheckEndpoint` _string_ | Health check endpoint |
 
 
 
@@ -682,7 +684,6 @@ _Appears in:_
 | `ready` _boolean_ |  |
 | `info` _string_ |  |
 | `conditions` _[Condition](#condition) array_ |  |
-| `version` _string_ |  |
 
 
 
@@ -798,6 +799,40 @@ _Appears in:_
 
 
 
+#### ResourceReference
+
+
+
+ResourceReference is the Schema for the resourcereferences API
+
+
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `formance.com/v1beta1`
+| `kind` _string_ | `ResourceReference`
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `spec` _[ResourceReferenceSpec](#resourcereferencespec)_ |  |
+
+
+#### ResourceReferenceSpec
+
+
+
+ResourceReferenceSpec defines the desired state of ResourceReference
+
+_Appears in:_
+- [ResourceReference](#resourcereference)
+
+| Field | Description |
+| --- | --- |
+| `stack` _string_ |  |
+| `gvk` _[GroupVersionKind](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#groupversionkind-v1-meta)_ |  |
+| `name` _string_ |  |
+
+
+
+
 #### Search
 
 
@@ -831,39 +866,6 @@ _Appears in:_
 | `version` _string_ |  |
 | `batching` _[Batching](#batching)_ |  |
 | `auth` _[AuthConfig](#authconfig)_ |  |
-
-
-
-
-#### SecretReference
-
-
-
-SecretReference is the Schema for the secretreferences API
-
-
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `formance.com/v1beta1`
-| `kind` _string_ | `SecretReference`
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `spec` _[SecretReferenceSpec](#secretreferencespec)_ |  |
-
-
-#### SecretReferenceSpec
-
-
-
-SecretReferenceSpec defines the desired state of SecretReference
-
-_Appears in:_
-- [SecretReference](#secretreference)
-
-| Field | Description |
-| --- | --- |
-| `stack` _string_ |  |
-| `secretName` _string_ |  |
 
 
 
@@ -938,8 +940,8 @@ _Appears in:_
 - [OrchestrationSpec](#orchestrationspec)
 - [PaymentsSpec](#paymentsspec)
 - [ReconciliationSpec](#reconciliationspec)
+- [ResourceReferenceSpec](#resourcereferencespec)
 - [SearchSpec](#searchspec)
-- [SecretReferenceSpec](#secretreferencespec)
 - [StargateSpec](#stargatespec)
 - [WalletsSpec](#walletsspec)
 - [WebhooksSpec](#webhooksspec)

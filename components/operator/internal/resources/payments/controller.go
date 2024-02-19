@@ -18,6 +18,10 @@ package payments
 
 import (
 	_ "embed"
+	"github.com/formancehq/operator/internal/resources/jobs"
+	"github.com/formancehq/operator/internal/resources/registries"
+	"github.com/pkg/errors"
+	batchv1 "k8s.io/api/batch/v1"
 	"net/http"
 
 	"github.com/formancehq/operator/internal/resources/benthosstreams"
@@ -40,22 +44,51 @@ import (
 
 func Reconcile(ctx Context, stack *v1beta1.Stack, p *v1beta1.Payments, version string) error {
 
-	database, err := databases.Create(ctx, p)
+	database, err := databases.Create(ctx, stack, p)
 	if err != nil {
 		return err
 	}
 
 	if database.Status.Ready {
-		if semver.IsValid(version) && semver.Compare(version, "v1.0.0-alpha") < 0 {
-			if err := createFullDeployment(ctx, stack, p, database, version); err != nil {
-				return err
-			}
-		} else {
-			if err := createReadDeployment(ctx, stack, p, database, version); err != nil {
+		image, err := registries.GetImage(ctx, stack, "payments", version)
+		if err != nil {
+			return err
+		}
+
+		if databases.GetSavedModuleVersion(database) != version {
+			encryptionKey, err := getEncryptionKey(ctx, p)
+			if err != nil {
 				return err
 			}
 
-			if err := createConnectorsDeployment(ctx, stack, p, database, version); err != nil {
+			if err := jobs.Handle(ctx, p, "migrate",
+				databases.MigrateDatabaseContainer(image, database,
+					func(m *databases.MigrationConfiguration) {
+						m.AdditionalEnv = []corev1.EnvVar{
+							Env("CONFIG_ENCRYPTION_KEY", encryptionKey),
+						}
+					},
+				),
+				jobs.WithServiceAccount(database.Status.URI.Query().Get("awsRole")),
+			); err != nil {
+				return err
+			}
+
+			if err := databases.SaveModuleVersion(ctx, database, version); err != nil {
+				return errors.Wrap(err, "saving module version in database object")
+			}
+		}
+
+		if semver.IsValid(version) && semver.Compare(version, "v1.0.0-alpha") < 0 {
+			if err := createFullDeployment(ctx, stack, p, database, image); err != nil {
+				return err
+			}
+		} else {
+			if err := createReadDeployment(ctx, stack, p, database, image); err != nil {
+				return err
+			}
+
+			if err := createConnectorsDeployment(ctx, stack, p, database, image); err != nil {
 				return err
 			}
 			if err := createGateway(ctx, stack, p); err != nil {
@@ -82,6 +115,7 @@ func Reconcile(ctx Context, stack *v1beta1.Stack, p *v1beta1.Payments, version s
 	}
 
 	if err := gatewayhttpapis.Create(ctx, p,
+		gatewayhttpapis.WithHealthCheckEndpoint("_health"),
 		gatewayhttpapis.WithRules(
 			v1beta1.GatewayHTTPAPIRule{
 				Path:    "/connectors/webhooks",
@@ -102,6 +136,7 @@ func init() {
 			WithOwn[*v1beta1.Payments](&appsv1.Deployment{}),
 			WithOwn[*v1beta1.Payments](&corev1.Service{}),
 			WithOwn[*v1beta1.Payments](&v1beta1.GatewayHTTPAPI{}),
+			WithOwn[*v1beta1.Payments](&batchv1.Job{}),
 			WithWatchSettings[*v1beta1.Payments](),
 			WithWatchDependency[*v1beta1.Payments](&v1beta1.Search{}),
 			databases.Watch[*v1beta1.Payments](),

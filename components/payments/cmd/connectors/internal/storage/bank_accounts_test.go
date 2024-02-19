@@ -8,6 +8,7 @@ import (
 	"github.com/formancehq/payments/cmd/connectors/internal/storage"
 	"github.com/formancehq/payments/internal/models"
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func TestBankAccounts(t *testing.T) {
 	testInstallConnectors(t, store)
 	testCreateAccounts(t, store)
 	testCreateBankAccounts(t, store)
-	testListBankAccounts(t, store)
+	testUpdateBankAccountMetadata(t, store)
 	testUninstallConnectors(t, store)
 	testBankAccountsDeletedAfterConnectorUninstall(t, store)
 }
@@ -56,18 +57,18 @@ func testCreateBankAccounts(t *testing.T, store *storage.Storage) {
 	require.NotEqual(t, uuid.Nil, bankAccount2.ID)
 	bankAccount2ID = bankAccount2.ID
 
-	adjustment := &models.BankAccountAdjustment{
+	relatedAccount := &models.BankAccountRelatedAccount{
 		ID:            uuid.New(),
 		CreatedAt:     bankAccount2T,
 		BankAccountID: bankAccount2ID,
 		ConnectorID:   connectorID,
 		AccountID:     acc1ID,
 	}
-	err = store.AddBankAccountAdjustment(context.Background(), adjustment)
+	err = store.AddBankAccountRelatedAccount(context.Background(), relatedAccount)
 	require.NoError(t, err)
-	bankAccount2.Adjustments = append(bankAccount2.Adjustments, adjustment)
+	bankAccount2.RelatedAccounts = append(bankAccount2.RelatedAccounts, relatedAccount)
 
-	err = store.AddBankAccountAdjustment(context.Background(), &models.BankAccountAdjustment{
+	err = store.AddBankAccountRelatedAccount(context.Background(), &models.BankAccountRelatedAccount{
 		ID:            uuid.New(),
 		CreatedAt:     bankAccount2T,
 		BankAccountID: bankAccount2ID,
@@ -109,53 +110,30 @@ func testGetBankAccount(
 		require.Equal(t, bankAccount.AccountNumber, expectedBankAccount.AccountNumber)
 	}
 
-	require.Len(t, bankAccount.Adjustments, len(expectedBankAccount.Adjustments))
-	for i, adj := range bankAccount.Adjustments {
-		require.Equal(t, adj.BankAccountID, expectedBankAccount.Adjustments[i].BankAccountID)
-		require.Equal(t, adj.CreatedAt.UTC(), expectedBankAccount.Adjustments[i].CreatedAt.UTC())
-		require.Equal(t, adj.ConnectorID, expectedBankAccount.Adjustments[i].ConnectorID)
-		require.Equal(t, adj.AccountID, expectedBankAccount.Adjustments[i].AccountID)
+	require.Len(t, bankAccount.RelatedAccounts, len(expectedBankAccount.RelatedAccounts))
+	for i, adj := range bankAccount.RelatedAccounts {
+		require.Equal(t, adj.BankAccountID, expectedBankAccount.RelatedAccounts[i].BankAccountID)
+		require.Equal(t, adj.CreatedAt.UTC(), expectedBankAccount.RelatedAccounts[i].CreatedAt.UTC())
+		require.Equal(t, adj.ConnectorID, expectedBankAccount.RelatedAccounts[i].ConnectorID)
+		require.Equal(t, adj.AccountID, expectedBankAccount.RelatedAccounts[i].AccountID)
 	}
 }
 
-func testListBankAccounts(t *testing.T, store *storage.Storage) {
-	query, err := storage.Paginate(1, "", nil, nil)
+func testUpdateBankAccountMetadata(t *testing.T, store *storage.Storage) {
+	metadata := map[string]string{
+		"key": "value",
+	}
+
+	err := store.UpdateBankAccountMetadata(context.Background(), bankAccount1ID, metadata)
 	require.NoError(t, err)
 
-	bankAccounts, paginationDetails, err := store.ListBankAccounts(context.Background(), query)
+	bankAccount, err := store.GetBankAccount(context.Background(), bankAccount1ID, false)
 	require.NoError(t, err)
-	require.Len(t, bankAccounts, 1)
-	require.True(t, paginationDetails.HasMore)
-	require.Equal(t, bankAccount1ID, bankAccounts[0].ID)
+	require.Equal(t, metadata, bankAccount.Metadata)
 
-	query, err = storage.Paginate(1, paginationDetails.NextPage, nil, nil)
-	require.NoError(t, err)
-
-	bankAccounts, paginationDetails, err = store.ListBankAccounts(context.Background(), query)
-	require.NoError(t, err)
-	require.Len(t, bankAccounts, 1)
-	require.False(t, paginationDetails.HasMore)
-	require.Equal(t, bankAccount2ID, bankAccounts[0].ID)
-
-	query, err = storage.Paginate(1, paginationDetails.PreviousPage, nil, nil)
-	require.NoError(t, err)
-
-	bankAccounts, paginationDetails, err = store.ListBankAccounts(context.Background(), query)
-	require.NoError(t, err)
-	require.Len(t, bankAccounts, 1)
-	require.True(t, paginationDetails.HasMore)
-	require.Equal(t, bankAccount1ID, bankAccounts[0].ID)
-
-	query, err = storage.Paginate(2, "", nil, nil)
-	require.NoError(t, err)
-
-	bankAccounts, paginationDetails, err = store.ListBankAccounts(context.Background(), query)
-	require.NoError(t, err)
-	require.Len(t, bankAccounts, 2)
-	require.False(t, paginationDetails.HasMore)
-	require.Equal(t, bankAccount1ID, bankAccounts[0].ID)
-	require.Equal(t, bankAccount2ID, bankAccounts[1].ID)
-
+	// Bank account not existing
+	err = store.UpdateBankAccountMetadata(context.Background(), uuid.New(), metadata)
+	require.True(t, errors.Is(err, storage.ErrNotFound))
 }
 
 func testBankAccountsDeletedAfterConnectorUninstall(t *testing.T, store *storage.Storage) {

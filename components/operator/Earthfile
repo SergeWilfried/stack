@@ -13,7 +13,7 @@ sources:
     COPY (stack+sources/out --LOCATION=ee/search) ee/search
     COPY (stack+sources/out --LOCATION=libs/go-libs) libs/go-libs
     WORKDIR /src/components/operator
-    COPY --dir api internal pkg .
+    COPY --dir api internal pkg cmd .
     COPY go.* .
     SAVE ARTIFACT /src
 
@@ -21,7 +21,7 @@ compile:
     FROM core+builder-image
     COPY (+sources/*) /src
     COPY --pass-args (+generate/*) /src/components/operator
-    WORKDIR /src/components/operator
+    WORKDIR /src/components/operator/cmd
 	DO --pass-args core+GO_COMPILE
 
 build-image:
@@ -112,7 +112,7 @@ tests:
     ENV ENVTEST_VERSION 1.28.0
     RUN setup-envtest use $ENVTEST_VERSION -p path
     ENV KUBEBUILDER_ASSETS /root/.local/share/kubebuilder-envtest/k8s/$ENVTEST_VERSION-linux-$(go env GOHOSTARCH)
-    DO --pass-args core+GO_INSTALL --package=github.com/onsi/ginkgo/v2/ginkgo@v2.13.2
+    DO --pass-args core+GO_INSTALL --package=github.com/onsi/ginkgo/v2/ginkgo@v2.14.0
     COPY (+sources/*) /src
     COPY --pass-args (+manifests/config) /src/components/operator/config
     COPY --pass-args (+generate/internal) /src/components/operator/internal
@@ -136,7 +136,7 @@ generate-docs:
     RUN go install github.com/elastic/crd-ref-docs@latest
     WORKDIR /src/components/operator
     COPY docs.config.yaml .
-    COPY --dir docs .
+    COPY --dir docs api .
     RUN crd-ref-docs --source-path=api/formance.com/v1beta1 --renderer=markdown --output-path=./docs/crd.md --config=./docs.config.yaml
     SAVE ARTIFACT docs/crd.md AS LOCAL docs/crd.md
 

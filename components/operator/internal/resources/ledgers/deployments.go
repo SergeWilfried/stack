@@ -2,11 +2,8 @@ package ledgers
 
 import (
 	"fmt"
-	"github.com/formancehq/operator/internal/resources/registries"
+	"github.com/formancehq/operator/internal/resources/jobs"
 	"strconv"
-
-	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/formancehq/operator/internal/resources/settings"
 
@@ -18,12 +15,9 @@ import (
 	"github.com/formancehq/operator/internal/resources/deployments"
 	"github.com/formancehq/operator/internal/resources/gateways"
 	"github.com/formancehq/operator/internal/resources/services"
-	"github.com/formancehq/stack/libs/go-libs/pointer"
 	v1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -73,37 +67,24 @@ func installLedgerSingleInstance(ctx core.Context, stack *v1beta1.Stack,
 		}
 	}
 
-	if err := createDeployment(ctx, stack, ledger, "ledger", *container, v2,
-		deployments.WithReplicas(1),
-		setInitContainer(database, version, v2),
-	); err != nil {
+	if err := createDeployment(ctx, stack, ledger, database, "ledger", *container, v2, deployments.WithReplicas(1)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func getUpgradeContainer(database *v1beta1.Database, image string) corev1.Container {
+func getUpgradeContainer(database *v1beta1.Database, image, version string) corev1.Container {
 	return databases.MigrateDatabaseContainer(image, database,
 		func(m *databases.MigrationConfiguration) {
-			m.Command = []string{"buckets", "upgrade-all"}
+			if core.IsLower(version, "v2.0.0-rc.6") {
+				m.Command = []string{"buckets", "upgrade-all"}
+			}
 			m.AdditionalEnv = []corev1.EnvVar{
 				core.Env("STORAGE_POSTGRES_CONN_STRING", "$(POSTGRES_URI)"),
 			}
 		},
 	)
-}
-
-func setInitContainer(database *v1beta1.Database, image string, v2 bool) func(t *v1.Deployment) error {
-	return func(t *v1.Deployment) error {
-		if !v2 {
-			t.Spec.Template.Spec.InitContainers = []corev1.Container{}
-			return nil
-		}
-		t.Spec.Template.Spec.InitContainers = []corev1.Container{getUpgradeContainer(database, image)}
-
-		return nil
-	}
 }
 
 func installLedgerMonoWriterMultipleReader(ctx core.Context, stack *v1beta1.Stack, ledger *v1beta1.Ledger, database *v1beta1.Database, image string, v2 bool) error {
@@ -114,7 +95,7 @@ func installLedgerMonoWriterMultipleReader(ctx core.Context, stack *v1beta1.Stac
 			return err
 		}
 
-		if err := createDeployment(ctx, stack, ledger, name, container, v2, mutators...); err != nil {
+		if err := createDeployment(ctx, stack, ledger, database, name, container, v2, mutators...); err != nil {
 			return err
 		}
 
@@ -131,7 +112,6 @@ func installLedgerMonoWriterMultipleReader(ctx core.Context, stack *v1beta1.Stac
 	}
 	if err := createDeployment("ledger-write", *container,
 		deployments.WithReplicas(1),
-		setInitContainer(database, image, v2),
 	); err != nil {
 		return err
 	}
@@ -176,11 +156,12 @@ func uninstallLedgerMonoWriterMultipleReader(ctx core.Context, stack *v1beta1.St
 	return nil
 }
 
-func createDeployment(ctx core.Context, stack *v1beta1.Stack, ledger *v1beta1.Ledger,
+func createDeployment(ctx core.Context, stack *v1beta1.Stack, ledger *v1beta1.Ledger, database *v1beta1.Database,
 	name string, container corev1.Container, v2 bool, mutators ...core.ObjectMutator[*v1.Deployment]) error {
 	mutators = append([]core.ObjectMutator[*v1.Deployment]{
 		deployments.WithContainers(container),
 		deployments.WithMatchingLabels(name),
+		deployments.WithServiceAccountName(database.Status.URI.Query().Get("awsRole")),
 		func(t *v1.Deployment) error {
 			if !v2 {
 				t.Spec.Template.Spec.Volumes = []corev1.Volume{{
@@ -205,7 +186,7 @@ func setCommonContainerConfiguration(ctx core.Context, stack *v1beta1.Stack, led
 		prefix = "NUMARY_"
 	}
 	env := make([]corev1.EnvVar, 0)
-	otlpEnv, err := settings.GetOTELEnvVarsWithPrefix(ctx, stack.Name, core.LowerCamelCaseName(ctx, ledger), prefix)
+	otlpEnv, err := settings.GetOTELEnvVarsWithPrefix(ctx, stack.Name, core.LowerCamelCaseKind(ctx, ledger), prefix)
 	if err != nil {
 		return err
 	}
@@ -299,85 +280,41 @@ func createGatewayDeployment(ctx core.Context, stack *v1beta1.Stack, ledger *v1b
 	}
 
 	env := make([]corev1.EnvVar, 0)
-	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, core.LowerCamelCaseName(ctx, ledger))
+	otlpEnv, err := settings.GetOTELEnvVars(ctx, stack.Name, core.LowerCamelCaseKind(ctx, ledger))
 	if err != nil {
 		return err
 	}
 	env = append(env, otlpEnv...)
 	env = append(env, core.GetDevEnvVars(stack, ledger)...)
 
-	image, err := registries.GetImage(ctx, stack, "gateway", "latest")
+	caddyImage, err := settings.GetStringOrDefault(ctx, stack.Name, "caddy:2.7.6-alpine", "caddy.image")
 	if err != nil {
 		return err
 	}
 
 	_, err = deployments.CreateOrUpdate(ctx, stack, ledger, "ledger-gateway",
-		settings.ConfigureCaddy(caddyfileConfigMap, image, env),
+		settings.ConfigureCaddy(caddyfileConfigMap, caddyImage, env),
 		deployments.WithMatchingLabels("ledger"),
 	)
 	return err
 }
 
-func migrateToLedgerV2(ctx core.Context, stack *v1beta1.Stack, ledger *v1beta1.Ledger, database *v1beta1.Database, image string) error {
+func migrate(ctx core.Context, stack *v1beta1.Stack, ledger *v1beta1.Ledger, database *v1beta1.Database, image, version string) error {
+	return jobs.Handle(ctx, ledger, "migrate-v2", getUpgradeContainer(database, image, version),
+		jobs.PreCreate(func() error {
+			list := &v1.DeploymentList{}
+			if err := ctx.GetClient().List(ctx, list, client.InNamespace(stack.Name)); err != nil {
+				return err
+			}
 
-	expectedSpec := batchv1.JobSpec{
-		BackoffLimit:            pointer.For(int32(10000)),
-		TTLSecondsAfterFinished: pointer.For(int32(30)),
-		Template: corev1.PodTemplateSpec{
-			Spec: corev1.PodSpec{
-				RestartPolicy: corev1.RestartPolicyOnFailure,
-				Containers:    []corev1.Container{getUpgradeContainer(database, image)},
-			},
-		},
-	}
-
-	job := &batchv1.Job{}
-	err := ctx.GetClient().Get(ctx, types.NamespacedName{
-		Namespace: stack.Name,
-		Name:      "migrate-v2",
-	}, job)
-	if client.IgnoreNotFound(err) != nil {
-		return err
-	}
-	if err == nil {
-		if job.Status.Succeeded > 0 {
-			return nil
-		}
-
-		if equality.Semantic.DeepDerivative(expectedSpec, job.Spec) {
-			return nil
-		}
-
-		if err := ctx.GetClient().Delete(ctx, job, &client.DeleteOptions{
-			GracePeriodSeconds: pointer.For(int64(0)),
-		}); err != nil {
-			return errors.Wrap(err, "deleting old v2 migration job")
-		}
-	} else {
-		list := &v1.DeploymentList{}
-		if err := ctx.GetClient().List(ctx, list, client.InNamespace(stack.Name)); err != nil {
-			return err
-		}
-
-		for _, item := range list.Items {
-			if controller := metav1.GetControllerOf(&item); controller != nil && controller.UID == ledger.GetUID() {
-				if err := ctx.GetClient().Delete(ctx, &item); err != nil {
-					return err
+			for _, item := range list.Items {
+				if controller := metav1.GetControllerOf(&item); controller != nil && controller.UID == ledger.GetUID() {
+					if err := ctx.GetClient().Delete(ctx, &item); err != nil {
+						return err
+					}
 				}
 			}
-		}
-	}
-
-	if _, _, err := core.CreateOrUpdate[*batchv1.Job](ctx, types.NamespacedName{
-		Namespace: stack.Name,
-		Name:      "migrate-v2",
-	}, core.WithController[*batchv1.Job](ctx.GetScheme(), ledger), func(t *batchv1.Job) error {
-		t.Spec = expectedSpec
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	return core.NewPendingError()
+			return nil
+		}),
+		jobs.WithServiceAccount(database.Status.URI.Query().Get("awsRole")))
 }

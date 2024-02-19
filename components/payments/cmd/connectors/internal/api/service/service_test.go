@@ -111,11 +111,32 @@ var (
 			},
 		},
 	}
+
+	sourceAccountID = models.AccountID{
+		Reference:   "acc1",
+		ConnectorID: connectorDummyPay.ID,
+	}
+
+	destinationAccountID = models.AccountID{
+		Reference:   "acc2",
+		ConnectorID: connectorDummyPay.ID,
+	}
+
+	destinationExternalAccountID = models.AccountID{
+		Reference:   "acc3",
+		ConnectorID: connectorDummyPay.ID,
+	}
 )
 
 type MockStore struct {
-	listConnectorsNB       int
-	bankAccountAdjustments []*models.BankAccountAdjustment
+	errorToSend                error
+	listConnectorsNB           int
+	bankAccountRelatedAccounts []*models.BankAccountRelatedAccount
+}
+
+func (m *MockStore) WithError(err error) *MockStore {
+	m.errorToSend = err
+	return m
 }
 
 func (m *MockStore) WithListConnectorsNB(nb int) *MockStore {
@@ -123,8 +144,8 @@ func (m *MockStore) WithListConnectorsNB(nb int) *MockStore {
 	return m
 }
 
-func (m *MockStore) WithBankAccountAdjustments(adjustments []*models.BankAccountAdjustment) *MockStore {
-	m.bankAccountAdjustments = adjustments
+func (m *MockStore) WithBankAccountRelatedAccounts(relatedAccounts []*models.BankAccountRelatedAccount) *MockStore {
+	m.bankAccountRelatedAccounts = relatedAccounts
 	return m
 }
 
@@ -151,6 +172,24 @@ func (m *MockStore) UpsertAccounts(ctx context.Context, accounts []*models.Accou
 }
 
 func (m *MockStore) GetAccount(ctx context.Context, id string) (*models.Account, error) {
+	switch id {
+	case sourceAccountID.String():
+		return &models.Account{
+			ID:   sourceAccountID,
+			Type: models.AccountTypeInternal,
+		}, nil
+	case destinationAccountID.String():
+		return &models.Account{
+			ID:   destinationAccountID,
+			Type: models.AccountTypeInternal,
+		}, nil
+	case destinationExternalAccountID.String():
+		return &models.Account{
+			ID:   destinationAccountID,
+			Type: models.AccountTypeExternal,
+		}, nil
+	}
+
 	return nil, nil
 }
 
@@ -159,20 +198,24 @@ func (m *MockStore) CreateBankAccount(ctx context.Context, account *models.BankA
 	return nil
 }
 
+func (m *MockStore) UpdateBankAccountMetadata(ctx context.Context, id uuid.UUID, metadata map[string]string) error {
+	return m.errorToSend
+}
+
 func (m *MockStore) GetBankAccount(ctx context.Context, id uuid.UUID, expand bool) (*models.BankAccount, error) {
 	return &models.BankAccount{
-		ID:           id,
-		CreatedAt:    time.Now().UTC(),
-		Name:         "test",
-		IBAN:         "FR7630006000011234567890189",
-		SwiftBicCode: "HBUKGB4B",
-		Country:      "FR",
-		Metadata:     map[string]string{},
-		Adjustments:  m.bankAccountAdjustments,
+		ID:              id,
+		CreatedAt:       time.Now().UTC(),
+		Name:            "test",
+		IBAN:            "FR7630006000011234567890189",
+		SwiftBicCode:    "HBUKGB4B",
+		Country:         "FR",
+		Metadata:        map[string]string{},
+		RelatedAccounts: m.bankAccountRelatedAccounts,
 	}, nil
 }
 
-func (m *MockStore) GetBankAccountAdjustments(ctx context.Context, id uuid.UUID) ([]*models.BankAccountAdjustment, error) {
+func (m *MockStore) GetBankAccountRelatedAccounts(ctx context.Context, id uuid.UUID) ([]*models.BankAccountRelatedAccount, error) {
 	return nil, nil
 }
 
